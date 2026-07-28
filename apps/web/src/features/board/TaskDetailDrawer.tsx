@@ -124,7 +124,18 @@ function kvControl(label: string, control: React.ReactNode) {
   )
 }
 
-export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+export function TaskDetailDrawer({
+  taskId,
+  onClose,
+  onStatusCommitted,
+}: {
+  taskId: string
+  onClose: () => void
+  /** Fires after a status change commits (success only), so the parent board can move
+   *  the card to its new column immediately instead of waiting for the next ~5s
+   *  reconciliation poll (#98). Mirrors the drawer's own optimistic `setDetail`. */
+  onStatusCommitted?: (taskId: string, newStatus: string) => void
+}) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [executions, setExecutions] = useState<BoardExecution[]>([])
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null)
@@ -271,7 +282,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                     taskId={task.id}
                     status={task.status}
                     assigneeAgentId={task.assigneeAgentId}
-                    onChange={(next) =>
+                    onChange={(next) => {
                       setDetail((d) =>
                         d
                           ? {
@@ -295,7 +306,10 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                             }
                           : d,
                       )
-                    }
+                      // Reflect the move on the board at once (#98). onChange fires only
+                      // on a committed change, so this never moves a card for a failed one.
+                      onStatusCommitted?.(taskId, next)
+                    }}
                   />,
                 )}
                 {kv('Assignee', String(task['assigneeAgentId'] ?? '—'))}

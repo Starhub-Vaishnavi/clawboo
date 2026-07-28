@@ -351,6 +351,36 @@ export function BoardPanel() {
     [],
   )
 
+  // Commit a status change into the authoritative `tasks` so the card moves to its new
+  // column at once — shared by the drawer's editor (via onStatusCommitted, issue #98) and
+  // the drag commit below, so the two manual paths behave identically (the same optimistic
+  // local-state patch handleCreated uses for a new card). Mirrors the server AND the
+  // drawer's own setDetail: a →todo release also clears the assignee/runtime/verdict, so
+  // the card never lingers with a stale runtime or a misleading verification pill until the
+  // poll catches up. Drops any in-flight override for the task so the committed status is
+  // authoritative; the next poll then simply agrees (same id, one column) — no flicker,
+  // no duplicate. Other server side effects (e.g. cancelling dependents) reconcile on that
+  // next poll, exactly as they do after a drag.
+  const commitStatus = useCallback(
+    (taskId: string, newStatus: string) => {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: newStatus,
+                ...(newStatus === 'todo'
+                  ? { assigneeAgentId: null, assigneeRuntime: null, verification: null }
+                  : {}),
+              }
+            : t,
+        ),
+      )
+      clearOverride(taskId)
+    },
+    [clearOverride],
+  )
+
   const onDragEnd = useCallback(
     async ({ active, over }: DragEndEvent) => {
       setActiveTask(null)
@@ -365,12 +395,9 @@ export function BoardPanel() {
         applyOptimistic: () => setOverrides((o) => ({ ...o, [move.taskId]: move.to })),
         rollback: () => clearOverride(move.taskId),
       })
-      if (ok) {
-        setTasks((prev) => prev.map((t) => (t.id === move.taskId ? { ...t, status: move.to } : t)))
-        clearOverride(move.taskId)
-      }
+      if (ok) commitStatus(move.taskId, move.to)
     },
-    [effectiveTasks, mutate, clearOverride],
+    [effectiveTasks, mutate, clearOverride, commitStatus],
   )
 
   // Mid-drag, a card may only land on a column it can legally transition to; all other
@@ -536,7 +563,13 @@ export function BoardPanel() {
       </div>
 
       <AnimatePresence>
-        {openTaskId && <TaskDetailDrawer taskId={openTaskId} onClose={() => setOpenTaskId(null)} />}
+        {openTaskId && (
+          <TaskDetailDrawer
+            taskId={openTaskId}
+            onClose={() => setOpenTaskId(null)}
+            onStatusCommitted={commitStatus}
+          />
+        )}
       </AnimatePresence>
 
       <NewTaskDialog
